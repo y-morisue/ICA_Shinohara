@@ -7,13 +7,72 @@ inputFiles = ["s1.wav", "s2.wav"];
 % Set pseudorandom seed
 rng(seed);
 
+%マイクを指定
+refMic = 1;
+
+%混合行列を作成
 mixMat = ...
     [0.8, -0.5;
     -0.7, 0.9];
 
+mixMat1 = ...
+    [0.8, 0;
+    -0.7, 0];
+
+mixMat2 = ...
+    [0, -0.5;
+    0, 0.9];
+
+% 二つの音声信号を一つの行列に
 for iData = 1:numel(inputFiles)
     inputPath = inputDir + inputFiles(iData);
     [src(:, iData), fs] = audioread(inputPath);
 end
+tSrc = src.'; % 音声信号転置
 
-obs = mixMat * src.'; % mixing 
+%ソースイメージを取得
+srcImg(:, :, 1) = mixMat1 * tSrc;
+srcImg(:, :, 2) = mixMat2 * tSrc;
+
+%ソースイメージから混合信号を取得
+obsSig = sum(srcImg, 3);
+
+%マイクからSDR,SIR,SARで参照するソースイメージを取得
+refSig(1, :) = srcImg(refMic, :, 1);
+refSig(2, :) = srcImg(refMic, :, 2);
+
+% 各種定数定義
+signalLength = size(src, 1); % 信号長確保
+% mixSrc = mixMat * tSrc; % 信号を混合
+stepSize = 0.05; % ステップサイズ定義
+L = 1000; % 反復回数定義
+W = rand(2); % 分離信号初期化
+I = eye(2); % 単位行列用意
+
+% メインの計算
+for l = 0:L 
+    E = zeros(2); % 零行列定義
+    Y = W * obsSig; 
+    score = tanh(Y); % スコア関数(tanh)に代入
+    R = score * Y.';
+    E = E + (1/signalLength) * R;
+    W = W - stepSize * (E - eye(2)) * W;
+end 
+
+Y = W * obsSig;
+invW = inv(W);
+
+%スケール補正
+estSig(1, :) = invW(refMic,1) * Y(1,:);
+estSig(2, :) = invW(refMic,2) * Y(2,:);
+sound (estSig(1,:),fs);
+
+addpath("./bss_eval/");
+
+%SDR,SIR,SAR
+[inSdr, inSir] = bss_eval_sources(obsSig, refSig);
+[outSdr, outSir, sar] = bss_eval_sources(estSig, refSig);
+impSdr = outSdr - inSdr;
+impSir = outSir - inSir;
+disp(impSdr);
+disp(impSir);
